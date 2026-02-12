@@ -18,6 +18,17 @@
           - git
         state: present
 
+    - name: Ensure hostname is set correctly
+      hostname:
+        name: "{{ ansible_hostname | default('cbTrophy-3873') }}"
+
+    - name: Map hostname to localhost in /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        regexp: '^127.0.1.1'
+        line: "127.0.1.1 {{ ansible_hostname | default('cbTrophy-3873') }}"
+        state: present
+
     # --- STAGE 2: INSTALL WIFI CONNECT (FIXED FILENAMES) ---
     - name: Detect Architecture
       command: uname -m

@@ -16,7 +16,9 @@
         name:
           - python3-pip
           - git
+          - network-manager
         state: present
+        update_cache: yes
 
     - name: Ensure hostname is set correctly
       hostname:
@@ -29,24 +31,17 @@
         line: "127.0.1.1 {{ ansible_hostname | default('cbTrophy-3873') }}"
         state: present
 
-    # --- STAGE 2: INSTALL WIFI CONNECT (FIXED FILENAMES) ---
+    # --- STAGE 2: INSTALL WIFI CONNECT ---
     - name: Detect Architecture
       command: uname -m
       register: cpu_arch
 
-    - name: Set Download Filename (64-bit)
+    - name: Set Download Filename
       set_fact:
-        wifi_filename: "wifi-connect-aarch64-unknown-linux-gnu.tar.gz"
-      when: cpu_arch.stdout == 'aarch64'
-
-    - name: Set Download Filename (32-bit)
-      set_fact:
-        wifi_filename: "wifi-connect-armv7-unknown-linux-gnueabihf.tar.gz"
-      when: cpu_arch.stdout != 'aarch64'
+        wifi_filename: "{{ 'wifi-connect-aarch64-unknown-linux-gnu.tar.gz' if cpu_arch.stdout == 'aarch64' else 'wifi-connect-armv7-unknown-linux-gnueabihf.tar.gz' }}"
 
     - name: Download & Install WiFi Connect
       unarchive:
-        # Note: The version is in the URL path, but NOT the filename
         src: "https://github.com/balena-os/wifi-connect/releases/download/v{{ wifi_connect_ver }}/{{ wifi_filename }}"
         dest: /usr/local/bin/
         remote_src: yes
@@ -76,7 +71,7 @@
         daemon_reload: yes
 
     # --- STAGE 2.5: INSTALL RGB LED MATRIX LIBRARY ---
-    - name: Clone RGB LED Matrix Library
+    - name: Clone & Build LED Library
       git:
         repo: "https://github.com/hzeller/rpi-rgb-led-matrix.git"
         dest: "/root/rpi-rgb-led-matrix"
@@ -87,10 +82,9 @@
       make:
         chdir: "/root/rpi-rgb-led-matrix"
       when: matrix_lib_updated.changed
-      # This takes a while on a Zero 2 W, so we increase the timeout
       vars:
         ansible_command_timeout: 1200
-    
+
     # --- STAGE 3: PRIVATE FIRMWARE ---
     - name: Clone Private Firmware
       git:
@@ -108,20 +102,35 @@
         chdir: "{{ install_dir }}"
       when: firmware_updated.changed
 
-    # --- STAGE 4: CLEANUP (Disable Old Networking) ---
-    # We do this LAST so we don't accidentally kill the connection during the run.
-    - name: Disable DietPi/ifupdown Networking
+    # --- STAGE 4: THE NETWORKING HANDOFF (CRITICAL) ---
+    - name: Ensure NetworkManager is Managing All Devices
+      ini_file:
+        path: /etc/NetworkManager/NetworkManager.conf
+        section: ifupdown
+        option: managed
+        value: "true"
+
+    - name: Unblock WiFi Radio
+      command: rfkill unblock wifi
+
+    - name: Disable Old DietPi Networking Services
+      systemd:
+        name: "{{ item }}"
+        enabled: no
+        state: stopped
+      loop:
+        - ifup@wlan0
+        - dhcpcd
+      failed_when: false
+
+    - name: Comment out wlan0 in interfaces file
       replace:
         path: /etc/network/interfaces
-        regexp: '^(allow-hotplug|iface)'
+        regexp: '^(.*wlan0.*)'
         replace: '# \1'
-      
-    - name: Ensure NetworkManager is Enabled
+
+    - name: Restart NetworkManager to take control
       systemd:
         name: NetworkManager
         enabled: yes
-        state: started
-
-  handlers:
-    - name: Reboot Pi
-      reboot:
+        state: restarted

@@ -17,6 +17,7 @@
           - python3-pip
           - git
           - network-manager
+          - rfkill
         state: present
         update_cache: yes
 

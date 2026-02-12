@@ -19,9 +19,17 @@
         state: present
 
     # --- STAGE 2: INSTALL WIFI CONNECT ---
+    - name: Detect Architecture
+      command: uname -m
+      register: cpu_arch
+
+    - name: Set Architecture Variable
+      set_fact:
+        wifi_arch: "{{ 'aarch64' if cpu_arch.stdout == 'aarch64' else 'armv7hf' }}"
+
     - name: Download WiFi Connect
       unarchive:
-        src: "https://github.com/balena-os/wifi-connect/releases/download/v{{ wifi_connect_ver }}/wifi-connect-v{{ wifi_connect_ver }}-linux-rpi.tar.gz"
+        src: "https://github.com/balena-os/wifi-connect/releases/download/v{{ wifi_connect_ver }}/wifi-connect-v{{ wifi_connect_ver }}-linux-{{ wifi_arch }}.tar.gz"
         dest: /usr/local/bin/
         remote_src: yes
         mode: '0755'

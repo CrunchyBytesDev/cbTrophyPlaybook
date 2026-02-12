@@ -18,18 +18,25 @@
           - git
         state: present
 
-    # --- STAGE 2: INSTALL WIFI CONNECT ---
+    # --- STAGE 2: INSTALL WIFI CONNECT (FIXED FILENAMES) ---
     - name: Detect Architecture
       command: uname -m
       register: cpu_arch
 
-    - name: Set Architecture Variable
+    - name: Set Download Filename (64-bit)
       set_fact:
-        wifi_arch: "{{ 'aarch64' if cpu_arch.stdout == 'aarch64' else 'armv7hf' }}"
+        wifi_filename: "wifi-connect-aarch64-unknown-linux-gnu.tar.gz"
+      when: cpu_arch.stdout == 'aarch64'
 
-    - name: Download WiFi Connect
+    - name: Set Download Filename (32-bit)
+      set_fact:
+        wifi_filename: "wifi-connect-armv7-unknown-linux-gnueabihf.tar.gz"
+      when: cpu_arch.stdout != 'aarch64'
+
+    - name: Download & Install WiFi Connect
       unarchive:
-        src: "https://github.com/balena-os/wifi-connect/releases/download/v{{ wifi_connect_ver }}/wifi-connect-v{{ wifi_connect_ver }}-linux-{{ wifi_arch }}.tar.gz"
+        # Note: The version is in the URL path, but NOT the filename
+        src: "https://github.com/balena-os/wifi-connect/releases/download/v{{ wifi_connect_ver }}/{{ wifi_filename }}"
         dest: /usr/local/bin/
         remote_src: yes
         mode: '0755'

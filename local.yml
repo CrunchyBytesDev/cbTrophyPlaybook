@@ -64,6 +64,22 @@
         enabled: yes
         daemon_reload: yes
 
+    # --- STAGE 2.5: INSTALL RGB LED MATRIX LIBRARY ---
+    - name: Clone RGB LED Matrix Library
+      git:
+        repo: "https://github.com/hzeller/rpi-rgb-led-matrix.git"
+        dest: "/root/rpi-rgb-led-matrix"
+        version: master
+      register: matrix_lib_updated
+
+    - name: Compile LED Matrix Library
+      make:
+        chdir: "/root/rpi-rgb-led-matrix"
+      when: matrix_lib_updated.changed
+      # This takes a while on a Zero 2 W, so we increase the timeout
+      vars:
+        ansible_command_timeout: 1200
+    
     # --- STAGE 3: PRIVATE FIRMWARE ---
     - name: Clone Private Firmware
       git:

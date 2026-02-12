@@ -5,7 +5,7 @@
 
   vars:
     install_dir: "/root/cbTrophy"
-    firmware_repo: "git@github.com:crunchybytes/cbTrophyPi.git"
+    firmware_repo: "git@github.com:CrunchyBytesDev/cbTrophyPi.git"
     ssh_key_path: "/root/.ssh/trophy_key"
     wifi_connect_ver: "4.11.84"
 

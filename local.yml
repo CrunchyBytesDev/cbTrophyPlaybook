@@ -1,0 +1,82 @@
+---
+- hosts: localhost
+  connection: local
+  become: yes
+
+  vars:
+    install_dir: "/root/cbTrophy"
+    firmware_repo: "git@github.com:crunchybytes/cbTrophyPi.git"
+    ssh_key_path: "/root/.ssh/trophy_key"
+    wifi_connect_ver: "4.11.84"
+
+  tasks:
+    # --- STAGE 1: FINALIZE NETWORK MIGRATION ---
+    - name: Disable DietPi Networking (Handover to NetworkManager)
+      replace:
+        path: /etc/network/interfaces
+        regexp: '^(allow-hotplug|iface)'
+        replace: '# \1'
+      # This ensures on next boot, ONLY NetworkManager is running.
+      
+    - name: Ensure NetworkManager is Enabled
+      systemd:
+        name: NetworkManager
+        enabled: yes
+        state: started
+
+    # --- STAGE 2: INSTALL WIFI CONNECT (FALLBACK) ---
+    - name: Download WiFi Connect
+      unarchive:
+        src: "https://github.com/balena-os/wifi-connect/releases/download/v{{ wifi_connect_ver }}/wifi-connect-v{{ wifi_connect_ver }}-linux-rpi.tar.gz"
+        dest: /usr/local/bin/
+        remote_src: yes
+        mode: '0755'
+
+    - name: Create WiFi Connect Service
+      copy:
+        dest: /etc/systemd/system/wifi-connect.service
+        content: |
+          [Unit]
+          Description=WiFi Connect Hotspot
+          After=NetworkManager.service
+
+          [Service]
+          Type=simple
+          # This will run if NM cannot connect to anything
+          ExecStart=/usr/local/bin/wifi-connect --portal-ssid "CrunchyBytes-Setup"
+          Restart=on-failure
+          RestartSec=30
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable WiFi Connect Service
+      systemd:
+        name: wifi-connect
+        enabled: yes
+        daemon_reload: yes
+
+    # --- STAGE 3: PRIVATE FIRMWARE ---
+    - name: Clone Private Firmware
+      git:
+        repo: "{{ firmware_repo }}"
+        dest: "{{ install_dir }}"
+        version: main
+        accept_hostkey: yes
+        force: yes
+      environment:
+        # We explicitly tell Git to use the key we moved in the script
+        GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no -i {{ ssh_key_path }}"
+      register: firmware_updated
+
+    - name: Compile Firmware
+      make:
+        chdir: "{{ install_dir }}"
+      when: firmware_updated.changed
+
+    # --- STAGE 4: HARDWARE TUNING ---
+    - name: Ensure Audio is Disabled
+      lineinfile:
+        path: /boot/config.txt
+        regexp: '^dtparam=audio='
+        line: 'dtparam=audio=off'

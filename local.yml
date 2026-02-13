@@ -103,16 +103,14 @@
         chdir: "{{ install_dir }}"
       when: firmware_updated.changed
 
-    # --- STAGE 4: THE NETWORK FIX ---
+    # --- STAGE 4: THE NETWORK HANDOFF ---
     
-    # 1. FORCE ENABLE THE SERVICE (This is what was missing)
     - name: Ensure NetworkManager starts on boot
       systemd:
         name: NetworkManager
         enabled: yes
         state: started
 
-    # 2. Tell NetworkManager it is the boss
     - name: Ensure NetworkManager is Managing All Devices
       ini_file:
         path: /etc/NetworkManager/NetworkManager.conf
@@ -123,7 +121,6 @@
     - name: Unblock WiFi Radio
       command: rfkill unblock wifi
 
-    # 3. NOW it is safe to kill the old stuff
     - name: Disable Old DietPi Networking Services
       systemd:
         name: "{{ item }}"
@@ -132,6 +129,7 @@
       loop:
         - ifup@wlan0
         - networking
+        - wpa_supplicant   <-- ADD THIS. It kills the conflict.
       failed_when: false
 
     - name: Nuke interfaces file

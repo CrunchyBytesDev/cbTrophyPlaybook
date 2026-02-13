@@ -129,7 +129,7 @@
       loop:
         - ifup@wlan0
         - networking
-        - wpa_supplicant   <-- ADD THIS. It kills the conflict.
+        - wpa_supplicant
       failed_when: false
 
     - name: Nuke interfaces file

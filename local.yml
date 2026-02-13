@@ -103,7 +103,7 @@
         chdir: "{{ install_dir }}"
       when: firmware_updated.changed
 
-    # --- STAGE 4: THE NETWORKING HANDOFF (SAFE MODE) ---
+    # --- STAGE 4: THE NETWORKING HANDOFF (CORRECTED) ---
     - name: Ensure NetworkManager is Managing All Devices
       ini_file:
         path: /etc/NetworkManager/NetworkManager.conf
@@ -114,18 +114,18 @@
     - name: Unblock WiFi Radio
       command: rfkill unblock wifi
 
-    - name: Disable Old DietPi Networking Services (DO NOT STOP)
+    - name: Disable Old DietPi Networking Services
       systemd:
         name: "{{ item }}"
         enabled: no
-        # REMOVED "state: stopped" - This keeps the connection alive until reboot!
+        state: stopped  # It is safe to stop these now because NM is already running
       loop:
         - ifup@wlan0
-        - dhcpcd
+        - networking    # <-- THIS is the one we missed. This controls the bootup.
       failed_when: false
 
-    - name: Comment out wlan0 in interfaces file
-      replace:
-        path: /etc/network/interfaces
-        regexp: '^(.*wlan0.*)'
-        replace: '# \1'
+    - name: Nuke interfaces file
+      copy:
+        dest: /etc/network/interfaces
+        content: "# Network managed by NetworkManager\n"
+        force: yes

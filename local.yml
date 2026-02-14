@@ -4,136 +4,57 @@
   become: yes
 
   vars:
-    install_dir: "/root/cbTrophy"
+    # Where your code lives
+    app_dir: "/home/cbtrophy/cbTrophyPi"
+    # Where the LED library lives (built in Golden Image)
+    matrix_lib_dir: "/home/cbtrophy/rpi-rgb-led-matrix"
+    # Your private repo
     firmware_repo: "git@github.com:CrunchyBytesDev/cbTrophyPi.git"
-    ssh_key_path: "/root/.ssh/trophy_key"
-    wifi_connect_ver: "4.11.84"
 
   tasks:
-    # --- STAGE 1: SYSTEM PREP ---
-    - name: Install System Dependencies
-      apt:
-        name:
-          - python3-pip
-          - git
-          - network-manager
-          - rfkill
-        state: present
-        update_cache: yes
-
-    - name: Ensure hostname is set correctly
-      hostname:
-        name: "{{ ansible_hostname | default('cbTrophy-3873') }}"
-
-    - name: Map hostname to localhost in /etc/hosts
-      lineinfile:
-        path: /etc/hosts
-        regexp: '^127.0.1.1'
-        line: "127.0.1.1 {{ ansible_hostname | default('cbTrophy-3873') }}"
-        state: present
-
-    # --- STAGE 2: INSTALL WIFI CONNECT ---
-    - name: Detect Architecture
-      command: uname -m
-      register: cpu_arch
-
-    - name: Set Download Filename
-      set_fact:
-        wifi_filename: "{{ 'wifi-connect-aarch64-unknown-linux-gnu.tar.gz' if cpu_arch.stdout == 'aarch64' else 'wifi-connect-armv7-unknown-linux-gnueabihf.tar.gz' }}"
-
-    - name: Download & Install WiFi Connect
-      unarchive:
-        src: "https://github.com/balena-os/wifi-connect/releases/download/v{{ wifi_connect_ver }}/{{ wifi_filename }}"
-        dest: /usr/local/bin/
-        remote_src: yes
-        mode: '0755'
-
-    - name: Create WiFi Connect Service
-      copy:
-        dest: /etc/systemd/system/wifi-connect.service
-        content: |
-          [Unit]
-          Description=WiFi Connect Hotspot
-          After=NetworkManager.service
-
-          [Service]
-          Type=simple
-          ExecStart=/usr/local/bin/wifi-connect --portal-ssid "CrunchyBytes-Setup"
-          Restart=on-failure
-          RestartSec=30
-
-          [Install]
-          WantedBy=multi-user.target
-
-    - name: Enable WiFi Connect Service
-      systemd:
-        name: wifi-connect
-        enabled: yes
-        daemon_reload: yes
-
-    # --- STAGE 2.5: INSTALL RGB LED MATRIX LIBRARY ---
-    - name: Clone & Build LED Library
-      git:
-        repo: "https://github.com/hzeller/rpi-rgb-led-matrix.git"
-        dest: "/root/rpi-rgb-led-matrix"
-        version: master
-      register: matrix_lib_updated
-
-    - name: Compile LED Matrix Library
-      make:
-        chdir: "/root/rpi-rgb-led-matrix"
-      when: matrix_lib_updated.changed
-      vars:
-        ansible_command_timeout: 1200
-
-    # --- STAGE 3: PRIVATE FIRMWARE ---
-    - name: Clone Private Firmware
+    # --- STAGE 1: DEPLOY CODE ---
+    
+    - name: Clone Private Firmware (As User)
       git:
         repo: "{{ firmware_repo }}"
-        dest: "{{ install_dir }}"
+        dest: "{{ app_dir }}"
         version: main
         accept_hostkey: yes
         force: yes
-      environment:
-        GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no -i {{ ssh_key_path }}"
-      register: firmware_updated
+      become_user: cbtrophy
+      register: app_updated
 
-    - name: Compile Firmware
-      make:
-        chdir: "{{ install_dir }}"
-      when: firmware_updated.changed
+    - name: Ensure Wget is Installed
+      apt:
+        name: wget
+        state: present
 
-    # --- STAGE 4: THE NETWORK HANDOFF ---
+    # --- STAGE 2: COMPILE C++ ---
     
-    - name: Ensure NetworkManager starts on boot
-      systemd:
-        name: NetworkManager
-        enabled: yes
-        state: started
-
-    - name: Ensure NetworkManager is Managing All Devices
-      ini_file:
-        path: /etc/NetworkManager/NetworkManager.conf
-        section: ifupdown
-        option: managed
-        value: "true"
-
-    - name: Unblock WiFi Radio
-      command: rfkill unblock wifi
-
-    - name: Disable Old DietPi Networking Services
-      systemd:
-        name: "{{ item }}"
-        enabled: no
-        state: stopped
-      loop:
-        - ifup@wlan0
-        - networking
-        - wpa_supplicant
-      failed_when: false
-
-    - name: Nuke interfaces file
+    - name: Create Makefile for C++ Build
       copy:
-        dest: /etc/network/interfaces
-        content: "# Network managed by NetworkManager\n"
-        force: yes
+        dest: "{{ app_dir }}/Makefile"
+        content: |
+          CXX=g++
+          CXXFLAGS=-Wall -O3 -g -Wextra -Wno-unused-parameter
+          # Include path for "led-matrix.h"
+          INCLUDES=-I{{ matrix_lib_dir }}/include
+          # Linker flags: static LED lib, pthreads, and WebP
+          LDFLAGS=-L{{ matrix_lib_dir }}/lib -lrgbmatrix -lrt -lm -lpthread -lwebp -lwebpdemux
+
+          all: trophy_app
+
+          trophy_app: web_test.cc
+          	$(CXX) $(CXXFLAGS) $(INCLUDES) web_test.cc -o trophy_app $(LDFLAGS)
+
+          clean:
+          	rm -f trophy_app
+      become_user: cbtrophy
+
+    - name: Compile Trophy App
+      make:
+        chdir: "{{ app_dir }}"
+      become_user: cbtrophy
+      # Force compile if code changed, or if the binary is missing
+      when: app_updated.changed or ansible_check_mode
+      ignore_errors: no

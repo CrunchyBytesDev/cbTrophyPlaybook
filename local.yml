@@ -12,8 +12,75 @@
     firmware_repo: "git@github.com:CrunchyBytesDev/cbTrophyPi.git"
 
   tasks:
-    # --- STAGE 1: DEPLOY CODE ---
-    
+    # --- STAGE 0: HARDWARE SANITIZATION (Critical for LED Matrix) ---
+
+    - name: Permanently disable and unload Pi Sound Module
+      block:
+        - name: Add sound module to blacklist
+          copy:
+            dest: /etc/modprobe.d/alsa-blacklist.conf
+            content: |
+              blacklist snd_bcm2835
+              blacklist snd_pcm
+              blacklist snd_timer
+              blacklist snd
+              install snd_bcm2835 /bin/false
+            owner: root
+            group: root
+            mode: '0644'
+
+        - name: Ensure audio is disabled in config.txt
+          lineinfile:
+            path: /boot/firmware/config.txt
+            regexp: '^dtparam=audio='
+            line: 'dtparam=audio=off'
+          register: config_audio
+          # Fallback check if path differs on older DietPi versions
+          ignore_errors: yes
+
+        - name: Force unload sound module immediately
+          modprobe:
+            name: snd_bcm2835
+            state: absent
+          failed_when: false
+
+    # --- STAGE 1: SYSTEM DEPENDENCIES & NETWORK HANDOVER ---
+
+    - name: Ensure System Dependencies are installed
+      apt:
+        name:
+          - wget
+          - git
+          - network-manager
+          - rfkill
+          - build-essential
+          - libwebp-dev
+        state: present
+        update_cache: yes
+
+    - name: Ensure NetworkManager is Managing All Devices
+      ini_file:
+        path: /etc/NetworkManager/NetworkManager.conf
+        section: ifupdown
+        option: managed
+        value: "true"
+
+    - name: Disable Old Networking Services
+      systemd:
+        name: "{{ item }}"
+        enabled: no
+        state: stopped
+      loop:
+        - ifup@wlan0
+        - networking
+        - wpa_supplicant
+      failed_when: false
+
+    - name: Unblock WiFi Radio
+      command: rfkill unblock wifi
+
+    # --- STAGE 2: DEPLOY CODE ---
+
     - name: Clone Private Firmware (As User)
       git:
         repo: "{{ firmware_repo }}"
@@ -24,13 +91,8 @@
       become_user: cbtrophy
       register: app_updated
 
-    - name: Ensure Wget is Installed
-      apt:
-        name: wget
-        state: present
+    # --- STAGE 3: COMPILE C++ ---
 
-    # --- STAGE 2: COMPILE C++ ---
-    
     - name: Create Makefile for C++ Build
       copy:
         dest: "{{ app_dir }}/Makefile"
@@ -55,6 +117,11 @@
       make:
         chdir: "{{ app_dir }}"
       become_user: cbtrophy
-      # Force compile if code changed, or if the binary is missing
       when: app_updated.changed or ansible_check_mode
       ignore_errors: no
+
+    # --- STAGE 4: FINALIZATION ---
+
+    - name: Reboot if config.txt was changed
+      reboot:
+      when: config_audio.changed

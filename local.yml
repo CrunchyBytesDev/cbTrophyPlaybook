@@ -46,18 +46,18 @@
 
     # --- STAGE 1: SYSTEM DEPENDENCIES & NETWORK HANDOVER ---
 
-    - name: Ensure System Dependencies are installed
+    - name: Ensure Runtime Dependencies are installed
       apt:
         name:
           - wget
           - git
+          - git-lfs
           - network-manager
           - rfkill
-          - build-essential
-          - libwebp-dev
-          - libwebsockets-dev
-          - nlohmann-json3-dev
-          - ccache
+          - libatomic1          # Standard for ARM C++ compatibility
+          - libwebp7            # Verified: No 't64' suffix
+          - libwebpdemux2       # Verified: No 't64' suffix
+          - libwebsockets19t64  # Verified: Has 't64' suffix
         state: present
         update_cache: yes
 
@@ -83,6 +83,12 @@
       command: rfkill unblock wifi
 
     # --- STAGE 2: DEPLOY CODE ---
+
+    - name: Initialize Git LFS
+      command: git lfs install --system
+      args:
+        creates: /etc/gitconfig  # Only runs if not already configured
+      become: yes
 
     - name: Clone Private Firmware (As User)
       git:

@@ -55,6 +55,9 @@
           - rfkill
           - build-essential
           - libwebp-dev
+          - libwebsockets-dev
+          - nlohmann-json3-dev
+          - ccache
         state: present
         update_cache: yes
 
@@ -91,37 +94,30 @@
       become_user: cbtrophy
       register: app_updated
 
-    # --- STAGE 3: COMPILE C++ ---
+    # --- STAGE 3: ASSET & RUNTIME PREP ---
 
-    - name: Create Makefile for C++ Build
-      copy:
-        dest: "{{ app_dir }}/Makefile"
-        content: |
-          CXX=g++
-          CXXFLAGS=-Wall -O3 -g -Wextra -Wno-unused-parameter
-          # Include path for "led-matrix.h"
-          INCLUDES=-I{{ matrix_lib_dir }}/include
-          # Linker flags: static LED lib, pthreads, and WebP
-          LDFLAGS=-L{{ matrix_lib_dir }}/lib -lrgbmatrix -lrt -lm -lpthread -lwebp -lwebpdemux
+    - name: Create Image Directories (Outside of Git tracking)
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: cbtrophy
+        group: cbtrophy
+        mode: '0775'
+      loop:
+        - "{{ app_dir }}/images"
+        - "{{ app_dir }}/images/status"
+        - "{{ app_dir }}/images/loop"
 
-          all: trophy_app
-
-          trophy_app: web_test.cc
-          	$(CXX) $(CXXFLAGS) $(INCLUDES) web_test.cc -o trophy_app $(LDFLAGS)
-
-          clean:
-          	rm -f trophy_app
-      become_user: cbtrophy
-
-    - name: Compile Trophy App
-      make:
-        chdir: "{{ app_dir }}"
-      become_user: cbtrophy
-      when: app_updated.changed or ansible_check_mode
-      ignore_errors: no
+    - name: Ensure binary is executable
+      file:
+        path: "{{ app_dir }}/web_test"
+        mode: '0755'
+        owner: cbtrophy
+        group: cbtrophy
 
     # --- STAGE 4: FINALIZATION ---
 
     - name: Reboot if config.txt was changed
       reboot:
+        msg: "Rebooting to disable sound modules and finalize hardware setup"
       when: config_audio.changed

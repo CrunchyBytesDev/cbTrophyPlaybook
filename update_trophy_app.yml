@@ -1,0 +1,33 @@
+---
+- hosts: pis
+  become: true
+  
+  vars:
+    # Adjust these if your paths differ
+    app_dir: "/home/cbtrophy/cbTrophyPi"
+    firmware_repo: "git@github.com:CrunchyBytesDev/cbTrophyPi.git"
+    branch_name: "develop" 
+
+  tasks:
+    - name: Stop Trophy Service
+      systemd:
+        name: trophy
+        state: stopped
+      ignore_errors: yes
+
+    - name: Git Pull (Force Update)
+      git:
+        repo: "{{ firmware_repo }}"
+        dest: "{{ app_dir }}"
+        version: "{{ branch_name }}"
+        force: yes           # Discards local changes
+        update: yes          # Pulls latest commit
+        accept_hostkey: yes
+      become_user: cbtrophy  # Uses the Pi's existing keys
+
+    - name: Restart Trophy Service
+      systemd:
+        name: trophy
+        state: restarted
+        enabled: yes
+        daemon_reload: yes

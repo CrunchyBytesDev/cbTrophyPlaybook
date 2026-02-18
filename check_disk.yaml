@@ -1,0 +1,10 @@
+---
+- hosts: pis
+  tasks:
+    - name: Check Disk Space
+      command: df -h /
+      register: disk_out
+
+    - name: Show Results
+      debug:
+        msg: "{{ disk_out.stdout_lines }}"

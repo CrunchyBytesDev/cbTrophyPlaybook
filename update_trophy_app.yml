@@ -1,33 +1,60 @@
 ---
 - hosts: pis
   become: true
-  
+
   vars:
-    # Adjust these if your paths differ
     app_dir: "/home/cbtrophy/cbTrophyPi"
     firmware_repo: "git@github.com:CrunchyBytesDev/cbTrophyPi.git"
-    branch_name: "develop" 
+    branch_name: "develop"
+    ssh_key: "/home/cbtrophy/.ssh/trophy_key"
 
   tasks:
-    - name: Stop Trophy Service
-      systemd:
-        name: trophy
-        state: stopped
-      ignore_errors: yes
-
-    - name: Git Pull (Force Update)
+    # --- STEP 1: PEEK AT GITHUB (Zero Downtime) ---
+    - name: Check for updates (Dry Run)
       git:
         repo: "{{ firmware_repo }}"
         dest: "{{ app_dir }}"
         version: "{{ branch_name }}"
-        force: yes           # Discards local changes
-        update: yes          # Pulls latest commit
+        update: yes
         accept_hostkey: yes
-      become_user: cbtrophy  # Uses the Pi's existing keys
+        key_file: "{{ ssh_key }}"
+      become_user: cbtrophy
+      check_mode: yes        # <--- Only PRETENDS to run
+      register: git_status   # <--- Saves the result
 
-    - name: Restart Trophy Service
-      systemd:
-        name: trophy
-        state: restarted
-        enabled: yes
-        daemon_reload: yes
+    - name: End play if no updates found
+      meta: end_host
+      when: not git_status.changed
+
+    - name: Announce update
+      debug:
+        msg: "Updates detected! Proceeding with deployment..."
+
+    # --- STEP 2: THE SAFETY WRAPPER ---
+    - block:
+        # --- DANGEROUS WORK GOES HERE ---
+        - name: Stop Trophy Service
+          systemd:
+            name: trophy
+            state: stopped
+
+        - name: Pull latest code (Real Run)
+          git:
+            repo: "{{ firmware_repo }}"
+            dest: "{{ app_dir }}"
+            version: "{{ branch_name }}"
+            force: yes
+            update: yes
+            accept_hostkey: yes
+            key_file: "{{ ssh_key }}"
+          become_user: cbtrophy
+
+      # --- STEP 3: THE GUARANTEE ---
+      always:
+        # This runs NO MATTER WHAT (even if Git fails)
+        - name: Ensure Trophy Service is running
+          systemd:
+            name: trophy
+            state: started
+            enabled: yes
+            daemon_reload: yes

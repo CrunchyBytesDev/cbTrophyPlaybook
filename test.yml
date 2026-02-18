@@ -1,0 +1,19 @@
+---
+- hosts: pis
+  become: true      # This tests if your sudo password/settings work
+
+  tasks:
+    # 1. Test basic SSH connectivity
+    - name: Ping the Pi (Ansible internal ping)
+      ping:
+
+    # 2. Test Root Privileges (Only root can read this file)
+    - name: Verify Sudo Access
+      command: head -n 1 /etc/shadow
+      register: root_check
+      changed_when: false
+
+    # 3. Prove we know who we are talking to
+    - name: Display Success Message
+      debug:
+        msg: "SUCCESS! Connected to {{ ansible_hostname }} ({{ ansible_default_ipv4.address }}) with Root privileges."

@@ -6,15 +6,13 @@
   vars:
     # Where your code lives
     app_dir: "/home/cbtrophy/cbTrophyPi"
-    # Where the LED library lives (built in Golden Image)
-    matrix_lib_dir: "/home/cbtrophy/rpi-rgb-led-matrix"
     # Your private repo
     firmware_repo: "git@github.com:CrunchyBytesDev/cbTrophyPi.git"
 
   tasks:
-    # --- STAGE 0: HARDWARE SANITIZATION (Critical for LED Matrix) ---
+    # --- STAGE 0: HARDWARE SANITIZATION (The Anti-Flicker Suite) ---
 
-    - name: Permanently disable and unload Pi Sound Module
+    - name: Permanently disable Audio Kernel Modules (Prevents GPIO Conflicts)
       block:
         - name: Add sound module to blacklist
           copy:
@@ -35,7 +33,6 @@
             regexp: '^dtparam=audio='
             line: 'dtparam=audio=off'
           register: config_audio
-          # Fallback check if path differs on older DietPi versions
           ignore_errors: yes
 
         - name: Force unload sound module immediately
@@ -44,7 +41,57 @@
             state: absent
           failed_when: false
 
-    # --- STAGE 1: SYSTEM DEPENDENCIES & NETWORK HANDOVER ---
+    - name: Disable Services known to cause LED Matrix Flicker
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+        masked: yes  # Ensures they NEVER start automatically
+      loop:
+        - cron              # Periodic tasks kill timing
+        - dphys-swapfile    # Swapping to SD card kills timing
+        - cups              # Printer discovery
+        - avahi-daemon      # mDNS scanning
+        - systemd-timesyncd # We will control this manually via Timer
+      ignore_errors: yes
+
+    # --- STAGE 0.5: DEPLOY SNIPER SYNC (Controlled Time Updates) ---
+
+    - name: Deploy Periodic "Sniper" Time Sync Service & Timer
+      copy:
+        dest: "/etc/systemd/system/{{ item.name }}"
+        content: "{{ item.content }}"
+        mode: '0644'
+      loop:
+        # 1. The Service: Wakes up, syncs fast, then dies to clear the bus
+        - name: trophy-sync.service
+          content: |
+            [Unit]
+            Description=One-shot Time Sync for Matrix
+            [Service]
+            Type=oneshot
+            # Logic: Unmask -> Start -> Enable NTP -> Wait 10s -> Disable NTP -> Stop -> Mask
+            ExecStart=/bin/bash -c 'systemctl unmask systemd-timesyncd; systemctl start systemd-timesyncd; timedatectl set-ntp true; sleep 10; timedatectl set-ntp false; systemctl stop systemd-timesyncd; systemctl mask systemd-timesyncd'
+
+        # 2. The Timer: Triggers the service every 30 mins
+        - name: trophy-sync.timer
+          content: |
+            [Unit]
+            Description=Run time sync every 30 minutes
+            [Timer]
+            OnBootSec=5min
+            OnUnitActiveSec=30min
+            [Install]
+            WantedBy=timers.target
+
+    - name: Enable the Time Sync Timer
+      systemd:
+        name: trophy-sync.timer
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    # --- STAGE 1: SYSTEM DEPENDENCIES & NETWORK ---
 
     - name: Ensure Runtime Dependencies are installed
       apt:
@@ -54,10 +101,10 @@
           - git-lfs
           - network-manager
           - rfkill
-          - libatomic1          # Standard for ARM C++ compatibility
-          - libwebp7            # Verified: No 't64' suffix
-          - libwebpdemux2       # Verified: No 't64' suffix
-          - libwebsockets19t64  # Verified: Has 't64' suffix
+          - libatomic1
+          - libwebp7
+          - libwebpdemux2
+          - libwebsockets19t64
         state: present
         update_cache: yes
 
@@ -68,60 +115,92 @@
         option: managed
         value: "true"
 
-    - name: Disable Old Networking Services
-      systemd:
-        name: "{{ item }}"
-        enabled: no
-        state: stopped
-      loop:
-        - ifup@wlan0
-        - networking
-        - wpa_supplicant
-      failed_when: false
-
     - name: Unblock WiFi Radio
       command: rfkill unblock wifi
 
-    # --- STAGE 2: DEPLOY CODE ---
+    # --- STAGE 2: DEPLOY CODE (Sparse Checkout) ---
 
-    - name: Initialize Git LFS
+    - name: Initialize Git LFS (Global)
       command: git lfs install --system
       args:
-        creates: /etc/gitconfig  # Only runs if not already configured
+        creates: /etc/gitconfig
       become: yes
 
-    - name: Clone Private Firmware (As User)
+    - name: Clone Client Folder Only (Sparse Checkout)
       git:
         repo: "{{ firmware_repo }}"
         dest: "{{ app_dir }}"
-        version: main
+        version: develop
         accept_hostkey: yes
         force: yes
+        lfs: yes                 # <--- Downloads the actual binary (not just pointer)
+        sparse_checkout:
+          - client               # <--- Downloads ONLY the client folder
+      become_user: cbtrophy      # <--- Critical: Ensures user owns the files
+
+    - name: Configure Git to ignore 'loop' directory
+      lineinfile:
+        path: "{{ app_dir }}/.git/info/exclude"
+        line: "loop/"
+        create: yes
       become_user: cbtrophy
-      register: app_updated
 
     # --- STAGE 3: ASSET & RUNTIME PREP ---
 
-    - name: Create Image Directories (Outside of Git tracking)
+    - name: Create Runtime Loop Directory (Local Only)
       file:
-        path: "{{ item }}"
+        path: "{{ app_dir }}/loop"
         state: directory
         owner: cbtrophy
         group: cbtrophy
         mode: '0775'
-      loop:
-        - "{{ app_dir }}/images"
-        - "{{ app_dir }}/images/status"
-        - "{{ app_dir }}/images/loop"
 
-    - name: Ensure binary is executable
+    - name: Ensure 'trophy' binary is executable
       file:
-        path: "{{ app_dir }}/web_test"
+        path: "{{ app_dir }}/client/trophy"
         mode: '0755'
         owner: cbtrophy
         group: cbtrophy
 
-    # --- STAGE 4: FINALIZATION ---
+    # --- STAGE 4: SERVICE DEPLOYMENT ---
+
+    - name: Deploy Systemd Service
+      copy:
+        dest: /etc/systemd/system/trophy.service
+        content: |
+          [Unit]
+          Description=cbTrophy Display Service
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=root
+          Group=root
+          # Pointing to the new client subfolder
+          WorkingDirectory={{ app_dir }}/client
+          # We use the standard path. If you need CPU pinning later, add 'taskset -c 3' here.
+          ExecStart={{ app_dir }}/client/trophy --led-gpio-mapping=adafruit-hat --led-slowdown-gpio=2
+          Restart=always
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Trophy Service
+
+  handlers:
+    - name: Restart Trophy Service
+      systemd:
+        name: trophy
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+
+    # --- STAGE 5: FINALIZATION ---
+    # Put reboot task here or handle manually
 
     - name: Reboot if config.txt was changed
       reboot:

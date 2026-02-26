@@ -120,6 +120,15 @@
 
     # --- STAGE 2: DEPLOY CODE (Sparse Checkout) ---
 
+    - name: Ensure cbtrophy owns its home directory (Fixes temporary and Git permission errors)
+      file:
+        path: /home/cbtrophy
+        state: directory
+        owner: cbtrophy
+        group: cbtrophy
+        recurse: yes
+      become: yes
+
     - name: Initialize Git LFS (Global)
       command: git lfs install --system
       args:

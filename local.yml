@@ -126,17 +126,29 @@
         creates: /etc/gitconfig
       become: yes
 
-    - name: Clone Client Folder Only (Sparse Checkout)
-      git:
-        repo: "{{ firmware_repo }}"
-        dest: "{{ app_dir }}"
-        version: develop
-        accept_hostkey: yes
-        force: yes
-        lfs: yes                 # <--- Downloads the actual binary (not just pointer)
-        sparse_checkout:
-          - client               # <--- Downloads ONLY the client folder
-      become_user: cbtrophy      # <--- Critical: Ensures user owns the files
+    - name: Clone repository without checking out files
+      command: "git clone --no-checkout --filter=blob:none {{ firmware_repo }} {{ app_dir }}"
+      args:
+        creates: "{{ app_dir }}/.git"
+      become_user: cbtrophy
+
+    - name: Configure sparse-checkout for client folder
+      command: git sparse-checkout set client
+      args:
+        chdir: "{{ app_dir }}"
+      become_user: cbtrophy
+
+    - name: Checkout develop branch
+      command: git checkout develop
+      args:
+        chdir: "{{ app_dir }}"
+      become_user: cbtrophy
+
+    - name: Pull Git LFS objects
+      command: git lfs pull
+      args:
+        chdir: "{{ app_dir }}"
+      become_user: cbtrophy
 
     - name: Configure Git to ignore 'loop' directory
       lineinfile:
@@ -180,7 +192,7 @@
           # Pointing to the new client subfolder
           WorkingDirectory={{ app_dir }}/client
           # We use the standard path. If you need CPU pinning later, add 'taskset -c 3' here.
-          ExecStart={{ app_dir }}/client/trophy --led-gpio-mapping=adafruit-hat --led-slowdown-gpio=2
+          ExecStart={{ app_dir }}/client/trophy --dev
           Restart=always
           RestartSec=10
 

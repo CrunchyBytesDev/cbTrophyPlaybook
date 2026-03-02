@@ -168,6 +168,27 @@
         owner: cbtrophy
         group: cbtrophy
 
+    - name: Update wifi-connect wrapper to use branded portal
+      copy:
+        dest: /usr/local/bin/wifi-connect-wrapper.sh
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          for i in $(seq 30); do
+              if nmcli -t -f STATE g 2>/dev/null | grep -q "^connected"; then
+                  echo "Already connected. Portal not needed."
+                  exit 0
+              fi
+              sleep 2
+          done
+          exec /usr/local/bin/wifi-connect -u {{ app_dir }}/wifi-portal -s CrunchyBytes-Setup
+
+    - name: Restart wifi-connect service
+      systemd:
+        name: wifi-connect
+        state: restarted
+        daemon_reload: yes
+
     # --- STAGE 4: SERVICE DEPLOYMENT ---
 
     - name: Deploy Systemd Service

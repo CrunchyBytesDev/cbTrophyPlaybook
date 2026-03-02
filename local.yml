@@ -105,6 +105,12 @@
 
     # --- STAGE 2: DEPLOY CODE (Sparse Checkout) ---
 
+    - name: Add cbtrophy to i2c group for accelerometer access
+      user:
+        name: cbtrophy
+        groups: i2c
+        append: yes
+
     - name: Ensure cbtrophy owns its home directory (Fixes temporary and Git permission errors)
       file:
         path: /home/cbtrophy
@@ -116,9 +122,8 @@
 
     - name: Initialize Git LFS (Global)
       command: git lfs install --system
-      args:
-        creates: /etc/gitconfig
       become: yes
+      changed_when: false
 
     - name: Clone repository without checking out files
       command: "git clone --no-checkout --filter=blob:none {{ firmware_repo }} {{ app_dir }}"
@@ -131,12 +136,14 @@
       args:
         chdir: "{{ app_dir }}"
       become_user: cbtrophy
+      changed_when: false
 
     - name: Checkout develop branch
       command: git checkout develop
       args:
         chdir: "{{ app_dir }}"
       become_user: cbtrophy
+      changed_when: false
 
     - name: Pull Git LFS objects
       command: git lfs pull
@@ -197,22 +204,21 @@
         content: |
           [Unit]
           Description=cbTrophy Display Service
-          After=network-online.target
-          Wants=network-online.target
+          DefaultDependencies=no
+          After=local-fs.target systemd-modules-load.service
+          Before=network-pre.target basic.target
 
           [Service]
           Type=simple
           User=root
           Group=root
-          # Pointing to the new client subfolder
           WorkingDirectory={{ app_dir }}/client
-          # We use the standard path. If you need CPU pinning later, add 'taskset -c 3' here.
           ExecStart={{ app_dir }}/client/trophy
           Restart=always
           RestartSec=10
 
           [Install]
-          WantedBy=multi-user.target
+          WantedBy=sysinit.target
         owner: root
         group: root
         mode: '0644'

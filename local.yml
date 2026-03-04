@@ -201,6 +201,8 @@
               fi
               sleep 2
           done
+          # Delete all saved WiFi networks so NM doesn't interfere with the AP
+          nmcli -t -f TYPE,NAME connection show | grep wifi | cut -d: -f2 | xargs -I{} nmcli connection delete "{}" 2>/dev/null || true
           exec /usr/local/bin/wifi-connect -u {{ app_dir }}/wifi-portal -s CrunchyBytes-Setup
 
     - name: Restart wifi-connect service

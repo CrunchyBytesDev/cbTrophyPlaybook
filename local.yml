@@ -33,6 +33,19 @@
             state: absent
           failed_when: false
 
+    - name: Ensure i2c-dev loads at boot (required for /dev/i2c-3 accelerometer)
+      copy:
+        dest: /etc/modules-load.d/i2c.conf
+        content: "i2c-dev\n"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Load i2c-dev immediately if not already loaded
+      modprobe:
+        name: i2c-dev
+        state: present
+
     - name: Disable Services known to cause LED Matrix Flicker
       systemd:
         name: "{{ item }}"

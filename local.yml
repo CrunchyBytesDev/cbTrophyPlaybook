@@ -206,6 +206,7 @@
 
               echo "No connection found, launching portal..."
               iw reg set US 2>/dev/null || true
+              sleep 3
               /usr/local/bin/wifi-connect -u {{ app_dir }}/wifi-portal -s CrunchyBytes-Setup
 
               echo "Portal closed, waiting for connection..."

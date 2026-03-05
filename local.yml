@@ -260,6 +260,10 @@
         path: /etc/NetworkManager/system-connections/azu.nmconnection
         state: absent
 
+    - name: Remove bench WiFi from NetworkManager connection cache
+      shell: nmcli connection delete azu 2>/dev/null || true
+      ignore_errors: yes
+
   handlers:
     - name: Restart Trophy Service
       systemd:

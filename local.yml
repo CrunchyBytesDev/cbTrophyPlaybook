@@ -195,6 +195,8 @@
         mode: '0755'
         content: |
           #!/bin/bash
+          # Set regulatory domain early so driver has 60s to settle before wifi-connect runs
+          iw reg set US 2>/dev/null || true
           while true; do
               for i in $(seq 30); do
                   if nmcli -t -f STATE g 2>/dev/null | grep -q "^connected"; then
@@ -205,8 +207,6 @@
               done
 
               echo "No connection found, launching portal..."
-              iw reg set US 2>/dev/null || true
-              sleep 3
               /usr/local/bin/wifi-connect -u {{ app_dir }}/wifi-portal -s CrunchyBytes-Setup
 
               echo "Portal closed, waiting for connection..."

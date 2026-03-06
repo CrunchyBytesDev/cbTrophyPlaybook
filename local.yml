@@ -146,7 +146,7 @@
       become_user: cbtrophy
 
     - name: Configure sparse-checkout for client folder
-      command: git sparse-checkout set client wifi-portal
+      command: git sparse-checkout set client wifi-portal scripts
       args:
         chdir: "{{ app_dir }}"
       become_user: cbtrophy

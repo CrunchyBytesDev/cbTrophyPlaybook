@@ -1,0 +1,29 @@
+---
+- hosts: localhost
+  connection: local
+  become: yes
+
+  vars:
+    app_dir: "/home/cbtrophy/cbTrophyPi"
+    firmware_repo: "git@github.com:CrunchyBytesDev/cbTrophyPi.git"
+    branch_name: "develop"
+    ssh_key: "/home/cbtrophy/.ssh/trophy_key"
+
+  tasks:
+    - name: Pull latest code
+      git:
+        repo: "{{ firmware_repo }}"
+        dest: "{{ app_dir }}"
+        version: "{{ branch_name }}"
+        force: yes
+        update: yes
+        accept_hostkey: yes
+        key_file: "{{ ssh_key }}"
+      become_user: cbtrophy
+
+    - name: Ensure trophy binary is executable
+      file:
+        path: "{{ app_dir }}/client/trophy"
+        mode: '0755'
+        owner: cbtrophy
+        group: cbtrophy

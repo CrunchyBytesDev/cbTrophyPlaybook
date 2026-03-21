@@ -5,7 +5,7 @@
   vars:
     app_dir: "/home/cbtrophy/cbTrophyPi"
     firmware_repo: "git@github.com:CrunchyBytesDev/cbTrophyPi.git"
-    branch_name: "develop"
+    branch_name: "staging"
     ssh_key: "/home/cbtrophy/.ssh/trophy_key"
 
   tasks:

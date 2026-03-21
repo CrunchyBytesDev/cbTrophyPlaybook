@@ -105,12 +105,14 @@
           - git
           - git-lfs
           - network-manager
+          - dnsmasq-base
           - rfkill
           - libatomic1
           - libwebp7
           - libwebpdemux2
           - libwebsockets19t64
           - iw
+          - python3-flask
         state: present
         update_cache: yes
 
@@ -146,7 +148,7 @@
       become_user: cbtrophy
 
     - name: Configure sparse-checkout for client folder
-      command: git sparse-checkout set client wifi-portal scripts
+      command: git sparse-checkout set client config-portal scripts
       args:
         chdir: "{{ app_dir }}"
       become_user: cbtrophy
@@ -189,40 +191,43 @@
         owner: cbtrophy
         group: cbtrophy
 
-    - name: Update wifi-connect wrapper to use branded portal
+    - name: Deploy config-portal boot wrapper
       copy:
-        dest: /usr/local/bin/wifi-connect-wrapper.sh
+        dest: /usr/local/bin/config-portal-wrapper.sh
         mode: '0755'
         content: |
           #!/bin/bash
-          while true; do
-              for i in $(seq 30); do
-                  if nmcli -t -f STATE g 2>/dev/null | grep -q "^connected"; then
-                      echo "Already connected. Portal not needed."
-                      exit 0
-                  fi
-                  sleep 2
-              done
+          if ! grep -rl "^type=wifi" /etc/NetworkManager/system-connections/ 2>/dev/null | grep -q .; then
+              exec python3 {{ app_dir }}/config-portal/portal.py
+          fi
+          exit 0
 
-              echo "No connection found, launching portal..."
-              /usr/local/bin/wifi-connect -u {{ app_dir }}/wifi-portal
+    - name: Deploy config-portal systemd service
+      copy:
+        dest: /etc/systemd/system/config-portal.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=CrunchyBytes Config Portal
+          After=NetworkManager.service
+          Wants=NetworkManager.service
 
-              echo "Portal closed, waiting for connection..."
-              for i in $(seq 30); do
-                  if nmcli -t -f STATE g 2>/dev/null | grep -q "^connected"; then
-                      echo "Connected successfully."
-                      exit 0
-                  fi
-                  sleep 2
-              done
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/config-portal-wrapper.sh
+          Restart=on-failure
+          RestartSec=30
+          StandardOutput=append:/boot/firmware/config-portal.log
+          StandardError=append:/boot/firmware/config-portal.log
 
-              echo "Still not connected, relaunching portal..."
-          done
+          [Install]
+          WantedBy=multi-user.target
 
-    - name: Restart wifi-connect service
+    - name: Enable and restart config-portal service
       systemd:
-        name: wifi-connect
+        name: config-portal
         state: restarted
+        enabled: yes
         daemon_reload: yes
 
     # --- STAGE 4: SERVICE DEPLOYMENT ---
